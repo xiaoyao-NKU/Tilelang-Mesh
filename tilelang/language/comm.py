@@ -1,9 +1,10 @@
 """Communication intrinsics wrappers for TileLang.
 
 This module provides small helper functions that prepare arguments and
-emit TIR intrinsics for inter-core communication on a target mesh. 
+emit TIR intrinsics for inter-core communication on a target mesh.
 """
-from typing import Tuple, Iterable
+
+from typing import Tuple, Iterable, Literal
 
 from tvm import tir
 import tilelang.language as T
@@ -11,32 +12,23 @@ from tilelang.utils.language import to_buffer_region
 
 
 def CoreId(core_id: int | tuple[int, int]):
-    """Create a TIR handle representing a core identifier.
+    """Convert a core identifier to a linear core ID for the target mesh.
 
     Parameters
     ----------
     core_id : int or tuple[int, int]
-        Either a linear core id (int) or a (row, col) tuple specifying the
-        core's coordinates on the target mesh. When a tuple is provided it
-        is converted to a linear id using the mesh shape.
+        Either a linear core id (int) or a 2-tuple (row, col) specifying the
+        core coordinates on the target mesh.
 
     Returns
     -------
-    tir.Call
-        A TIR intrinsic handle produced by `tir.call_intrin(..., tl.CoreId, ...)`.
+    int
+        The linear core id mapped into [0, mesh_x * mesh_y).
 
     Raises
     ------
-    AssertionError
-        If any coordinate is outside the mesh bounds determined by
-        `T.get_target_mesh_shape("auto")`.
-    ValueError
-        If `core_id` is neither an int nor a two-element tuple.
-
-    Examples
-    --------
-    >>> CoreId((0, 1))
-    >>> CoreId(3)
+    AssertionError, ValueError
+        If the provided coordinates are out of bounds or the type is invalid.
     """
     mesh_shape = T.get_target_mesh_shape("auto")
     if isinstance(core_id, tuple):
@@ -56,167 +48,146 @@ def CoreId(core_id: int | tuple[int, int]):
         ), f"Core ID {core_id_value} out of bounds for mesh shape {mesh_shape}"
     else:
         raise ValueError("core_id must be either a tuple[int, int] or an int.")
-    return tir.call_intrin("handle", tir.op.Op.get("tl.CoreId"), core_id_value)
+    return core_id_value
 
 
-def put(
-    src_buffer: T.Buffer,
-    dst_buffer: T.Buffer,
-    dst_core: tuple[int, int],
-    size: int | None = None,
-):
-    """Emit a remote `put` (copy) intrinsic from `src_buffer` to `dst_buffer`.
+def core_id_to_tuple(core_id: tir.Call) -> Tuple[int, int]:
+    """Convert a linear core id into 2D (row, col) coordinates on the mesh.
 
     Parameters
     ----------
-    src_buffer : T.Buffer
-        Source buffer region to send.
-    dst_buffer : T.Buffer
-        Destination buffer region on the remote core.
-    dst_core : tuple[int, int]
-        Target core coordinates (row, col) to which data will be sent.
-    size : int | None = None
-        Optional size (in elements) to limit the copy. If omitted the full 
-        buffer region is used.
+    core_id : tir.Call
+        A linear core identifier (or a TIR expression that yields one).
 
     Returns
     -------
-    tir.Call
-        The TIR intrinsic call handle for `tl.comm_put`.
+    tuple[int, int]
+        The (row, col) coordinates corresponding to the linear core id.
 
-    Examples
-    --------
-    >>> put(A, B, (1, 3))
-    >>> put(A, B, (2, 3), size=1024)
+    Notes
+    -----
+    The conversion uses the current target mesh shape obtained via
+    T.get_target_mesh_shape("auto").
     """
-    src_buffer_region = to_buffer_region(src_buffer)
-    dst_buffer_region = to_buffer_region(dst_buffer)
-    dst_core_id = CoreId(dst_core)
-    if size is None:
-        args = (src_buffer_region, dst_buffer_region, dst_core_id)
-    else:
-        args = (src_buffer_region, dst_buffer_region, dst_core_id, size)
-    return tir.call_intrin("handle", tir.op.Op.get("tl.comm_put"), *args)
+    mesh_shape = T.get_target_mesh_shape("auto")
+    core_id_value = core_id
+    row = core_id_value // mesh_shape["y"]
+    col = core_id_value % mesh_shape["y"]
+    return (row, col)
 
 
 def broadcast(
-    buffer: T.Buffer,
+    src: T.Buffer,
+    dst: T.Buffer,
     src_core: tuple[int, int],
-    group: Iterable[tuple[int, int]] | None = None,
+    group: (
+        Literal["horizontal", "h", "vertical", "v", "all", "a"]
+        | Iterable[tuple[int, int]]
+        | None
+    ) = None,
+    size: int = -1,
 ):
-    """Broadcast a buffer from `src_core` to a set of cores.
+    """
+    Broadcast data from a source buffer on a specific source core to destination buffers on 
+    a set of participant cores by emitting the TIR intrinsic tl.tileop.comm_broadcast.
 
     Parameters
     ----------
-    buffer : T.Buffer
-        Buffer region to broadcast.
+    src : T.Buffer
+        Source buffer containing data to broadcast.
+    dst : T.Buffer
+        Destination buffer to receive the broadcasted data.
     src_core : tuple[int, int]
-        Source core coordinates that will broadcast the buffer.
-    group : iterable of tuple[int, int] | None
-        Optional iterable of core coordinates specifying the recipients.
-        If omitted, the runtime's default participant set is used.
-
+        (row, col) coordinates of the source core on the target mesh.
+    group : {'horizontal', 'h', 'vertical', 'v', 'all', 'a'} | iterable of tuple[int, int] | None
+        Participant set for the broadcast. Can be one of the following strings:
+        - 'horizontal' or 'h': all cores in the same row as the destination core.
+        - 'vertical' or 'v': all cores in the same column as the destination core.
+        - 'all' or 'a': all cores in the mesh as the destination core.
+        Alternatively, an explicit iterable of (row, col) tuples can be provided.
+        If None, defaults to 'all'.
+    size : int
+        Number of elements to broadcast. If -1, the entire source buffer is used.
     Returns
     -------
     tir.Call
-        The TIR intrinsic call handle for `tl.comm_broadcast`.
-
+        The TIR intrinsic call handle for `tl.tileop.comm_broadcast`.
     Examples
     --------
-    >>> broadcast(A, (0, 0))
-    >>> broadcast(A, (1, 2), group=[(1, 2), (1, 3)])
+    >>> broadcast(A, B, (1, 2), group='horizontal')
+    >>> broadcast(A, B, (0, 0), group=[(0,0),(0,1),(1,0)])
     """
+    assert (
+        src.dtype == dst.dtype
+    ), f"Source and destination buffer dtypes must match for broadcast. Got {src.dtype} vs {dst.dtype}."
+    if len(src.shape) != len(dst.shape):
+        raise ValueError(
+            "Source and destination buffer must have the same number of dimensions for broadcast."
+        )
+    for i in range(len(src.shape)):
+        assert (
+            src.shape[i] == dst.shape[i] or src.shape[i] == 1 or dst.shape[i] == 1
+        ), f"Source buffer shape  and destination buffer shape must match for broadcast. Got {src.shape} vs {dst.shape}."
+
+    mesh_shape = T.get_target_mesh_shape("auto")
+    assert (
+        isinstance(src_core, tuple) and len(src_core) == 2
+    ), "src_core must be a tuple of (row, col)."
+    assert (
+        0 <= src_core[0] < mesh_shape["x"]
+    ), f"src_core row {src_core[0]} out of bounds for mesh shape {mesh_shape}."
+    assert (
+        0 <= src_core[1] < mesh_shape["y"]
+    ), f"src_core col {src_core[1]} out of bounds for mesh shape {mesh_shape}."
+
+    src_elements = 1
+    for dim in src.shape:
+        src_elements *= dim
+    assert isinstance(size, int) and size >= -1, "size must be an integer >= -1."
+    assert (
+        size <= src_elements
+    ), f"size {size} exceeds source buffer size {src_elements}."
+
+    src_region = to_buffer_region(src)
+    dst_region = to_buffer_region(dst)
     src_core_id = CoreId(src_core)
-    buffer_region = to_buffer_region(buffer)
+
     if group is None:
-        args = (buffer_region, src_core_id)
+        group = "all"
+    if isinstance(group, str):
+        if group.lower() in ["horizontal", "h"]:
+            row, col = core_id_to_tuple(src_core_id)
+            group = [(row, c) for c in range(mesh_shape["y"])]
+        elif group.lower() in ["vertical", "v"]:
+            row, col = core_id_to_tuple(src_core_id)
+            group = [(r, col) for r in range(mesh_shape["x"])]
+        elif group.lower() in ["all", "a"]:
+            group = [
+                (r, c) for r in range(mesh_shape["x"]) for c in range(mesh_shape["y"])
+            ]
+        else:
+            raise ValueError(f"Invalid group string: {group}")
+    elif isinstance(group, Iterable):
+        for core_id in group:
+            assert (
+                isinstance(core_id, tuple) and len(core_id) == 2
+            ), "Each core_id in group must be a tuple of (row, col)."
+            assert (
+                0 <= core_id[0] < mesh_shape["x"]
+            ), f"core_id row {core_id[0]} out of bounds for mesh shape {mesh_shape}."
+            assert (
+                0 <= core_id[1] < mesh_shape["y"]
+            ), f"core_id col {core_id[1]} out of bounds for mesh shape {mesh_shape}."
+        pass
     else:
-        group = [CoreId(core_id) for core_id in group]
-        args = (buffer_region, src_core_id, *group)
-    return tir.call_intrin("handle", tir.op.Op.get("tl.comm_broadcast"), *args)
+        raise ValueError(
+            "group must be either a string or an iterable of tuple[int, int]."
+        )
 
-
-def all_gather(
-    send_buffer: T.Buffer,
-    recv_buffer: T.Buffer,
-    group: Iterable[tuple[int, int]] | None = None,
-):
-    """Perform an all-gather: collect contributions into `recv_buffer`.
-
-    Parameters
-    ----------
-    send_buffer : T.Buffer
-        Local buffer containing this core's contribution.
-    recv_buffer : T.Buffer
-        Buffer to receive the gathered result.
-    group : iterable of tuple[int, int] | None
-        Optional participant set for the all-gather.
-
-    Returns
-    -------
-    tir.Call
-        The TIR intrinsic call handle for `tl.comm_allgather`.
-
-    Examples
-    --------
-    >>> all_gather(A, B)
-    >>> all_gather(A, B, group=[(0,0),(0,1)])
-    """
-    send_buffer_region = to_buffer_region(send_buffer)
-    recv_buffer_region = to_buffer_region(recv_buffer)
-    if group is None:
-        args = (send_buffer_region, recv_buffer_region)
-    else:
-        group = [CoreId(core_id) for core_id in group]
-        args = (send_buffer_region, recv_buffer_region, *group)
-    return tir.call_intrin("handle", tir.op.Op.get("tl.comm_allgather"), *args)
-
-
-def all_reduce(
-    op: str,
-    src_buffer: T.Buffer,
-    dst_buffer: T.Buffer,
-    group: Iterable[tuple[int, int]] | None = None,
-    axis: int | None = None,
-):
-    """Reduce values across cores using the specified operation.
-
-    Parameters
-    ----------
-    op : str
-        Reduction operation name (for example, 'sum', 'max').
-    src_buffer : T.Buffer
-        Source buffer containing local values to reduce.
-    dst_buffer : T.Buffer
-        Destination buffer to hold the reduced result.
-    group : iterable of tuple[int, int] | None
-        Optional participant set for the reduction.
-    axis : int | None
-        Optional axis parameter forwarded to the intrinsic if supported.
-
-    Returns
-    -------
-    tir.Call
-        The TIR intrinsic call handle for `tl.comm_reduce`.
-
-    Examples
-    --------
-    >>> all_reduce('sum', A, B)
-    >>> all_reduce('sum', A, B, group=[(0,0),(0,1)], axis=0)
-    """
-    src_buffer_region = to_buffer_region(src_buffer)
-    dst_buffer_region = to_buffer_region(dst_buffer)
-    if group is None and axis is None:
-        args = (op, src_buffer_region, dst_buffer_region)
-    elif group is not None and axis is None:
-        group = [CoreId(core_id) for core_id in group]
-        args = (op, src_buffer_region, dst_buffer_region, *group)
-    elif group is None and axis is not None:
-        args = (op, src_buffer_region, dst_buffer_region, axis)
-    else:
-        group = [CoreId(core_id) for core_id in group]
-        args = (op, src_buffer_region, dst_buffer_region, axis, *group)
-    return tir.call_intrin("handle", tir.op.Op.get("tl.comm_reduce"), *args)
+    group = [CoreId(core_id) for core_id in group]
+    dst_offset = 0  # Always 0 for now
+    args = (src_region, dst_region, size, dst_offset, src_core_id, *group)
+    return tir.call_intrin("handle", tir.op.Op.get("tl.tileop.comm_broadcast"), *args)
 
 
 def barrier(group: Iterable[tuple[int, int]] | None = None):
