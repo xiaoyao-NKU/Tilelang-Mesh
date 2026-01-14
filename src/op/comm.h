@@ -52,6 +52,100 @@ public:
   static const Op &Get();
 };
 
+
+class PutNode : public TileOperatorNode {
+public:
+  PrimExpr src, dst;
+  PrimExpr src_core, dst_core;
+  IntImm size;
+
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tl.comm_put", PutNode, TileOperatorNode);
+
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<PutNode>()
+        .def_ro("src", &PutNode::src)
+        .def_ro("dst", &PutNode::dst)
+        .def_ro("src_core", &PutNode::src_core)
+        .def_ro("dst_core", &PutNode::dst_core)
+        .def_ro("size", &PutNode::size);
+  }
+
+  Stmt Lower(const LowerArgs &T, arith::Analyzer *analyzer) const override;
+  LayoutMap InferLayout(const LayoutInferArgs &T, InferLevel level) const override;
+  TileOperator Clone() const;
+};
+
+class Put : public TileOperator {
+public:
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(Put, TileOperator, PutNode);
+  TVM_DLL Put(Array<PrimExpr> args);
+  static const Op &Get();
+};
+
+
+class AllgatherNode : public TileOperatorNode {
+public:
+  PrimExpr send, recv;
+  IntImm size;
+  Array<IntImm> group;
+
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tl.comm_allgather", AllgatherNode, TileOperatorNode);
+  
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<AllgatherNode>()
+        .def_ro("send", &AllgatherNode::send)
+        .def_ro("recv", &AllgatherNode::recv)
+        .def_ro("size", &AllgatherNode::size)
+        .def_ro("group", &AllgatherNode::group);
+  }
+
+  Stmt Lower(const LowerArgs &T, arith::Analyzer *analyzer) const override;
+  LayoutMap InferLayout(const LayoutInferArgs &T, InferLevel level) const override;
+  TileOperator Clone() const;
+};
+
+class Allgather : public TileOperator {
+public:
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(Allgather, TileOperator, AllgatherNode);
+  TVM_DLL Allgather(Array<PrimExpr> args);
+  static const Op &Get();
+};
+
+
+class ReduceNode : public TileOperatorNode {
+public:
+  IntImm op;
+  Buffer src, dst;
+  Array<Range> src_range, dst_range;
+  IntImm axis;
+  Array<PrimExpr> group;
+
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tl.comm_reduce", ReduceNode, TileOperatorNode);
+  
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<ReduceNode>()
+        .def_ro("op", &ReduceNode::op)
+        .def_ro("src", &ReduceNode::src)
+        .def_ro("dst", &ReduceNode::dst)
+        .def_ro("axis", &ReduceNode::axis)
+        .def_ro("group", &ReduceNode::group);
+  }
+
+  Stmt Lower(const LowerArgs &T, arith::Analyzer *analyzer) const override;
+  LayoutMap InferLayout(const LayoutInferArgs &T, InferLevel level) const override;
+  TileOperator Clone() const;
+};  
+
+class Reduce : public TileOperator {
+public:
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(Reduce, TileOperator, ReduceNode);
+  TVM_DLL Reduce(Array<PrimExpr> args);
+  static const Op &Get();
+};
+
 } // namespace tl
 } // namespace tvm
 
