@@ -3,8 +3,10 @@
 This module provides small helper functions that prepare arguments and
 emit TIR intrinsics for inter-core communication on a target mesh.
 """
+from __future__ import annotations
 
-from typing import Tuple, Iterable, Literal
+from typing import Literal
+from collections.abc import Iterable
 
 from tvm import tir
 import tilelang.language as T
@@ -33,25 +35,20 @@ def CoreId(core_id: int | tuple[int, int]):
     mesh_shape = T.get_target_mesh_shape("auto")
     if isinstance(core_id, tuple):
         row, col = core_id
-        assert (
-            0 <= row < mesh_shape["x"]
-        ), f"Row {row} out of bounds for mesh shape {mesh_shape}"
-        assert (
-            0 <= col < mesh_shape["y"]
-        ), f"Col {col} out of bounds for mesh shape {mesh_shape}"
+        assert (0 <= row < mesh_shape["x"]), f"Row {row} out of bounds for mesh shape {mesh_shape}"
+        assert (0 <= col < mesh_shape["y"]), f"Col {col} out of bounds for mesh shape {mesh_shape}"
         # Convert 2D coordinates into a linear core id.
         core_id_value = row * mesh_shape["x"] + col
     elif isinstance(core_id, int):
         core_id_value = core_id
-        assert (
-            0 <= core_id_value < mesh_shape["x"] * mesh_shape["y"]
-        ), f"Core ID {core_id_value} out of bounds for mesh shape {mesh_shape}"
+        assert (0 <= core_id_value < mesh_shape["x"] * mesh_shape["y"]
+               ), f"Core ID {core_id_value} out of bounds for mesh shape {mesh_shape}"
     else:
         raise ValueError("core_id must be either a tuple[int, int] or an int.")
     return core_id_value
 
 
-def core_id_to_tuple(core_id: tir.Call) -> Tuple[int, int]:
+def core_id_to_tuple(core_id: tir.Call) -> tuple[int, int]:
     """Convert a linear core id into 2D (row, col) coordinates on the mesh.
 
     Parameters
@@ -80,11 +77,9 @@ def broadcast(
     src: T.Buffer,
     dst: T.Buffer,
     src_core: tuple[int, int],
-    group: (
-        Literal["horizontal", "h", "vertical", "v", "all", "a"]
-        | Iterable[tuple[int, int]]
-        | None
-    ) = None,
+    group: (Literal["horizontal", "h", "vertical", "v", "all", "a"]
+            | Iterable[tuple[int, int]]
+            | None) = None,
     size: int = -1,
 ):
     """
@@ -122,31 +117,25 @@ def broadcast(
     ), f"Source and destination buffer dtypes must match for broadcast. Got {src.dtype} vs {dst.dtype}."
     if len(src.shape) != len(dst.shape):
         raise ValueError(
-            "Source and destination buffer must have the same number of dimensions for broadcast."
-        )
+            "Source and destination buffer must have the same number of dimensions for broadcast.")
     for i in range(len(src.shape)):
         assert (
             src.shape[i] == dst.shape[i] or src.shape[i] == 1 or dst.shape[i] == 1
         ), f"Source buffer shape  and destination buffer shape must match for broadcast. Got {src.shape} vs {dst.shape}."
 
     mesh_shape = T.get_target_mesh_shape("auto")
-    assert (
-        isinstance(src_core, tuple) and len(src_core) == 2
-    ), "src_core must be a tuple of (row, col)."
-    assert (
-        0 <= src_core[0] < mesh_shape["x"]
-    ), f"src_core row {src_core[0]} out of bounds for mesh shape {mesh_shape}."
-    assert (
-        0 <= src_core[1] < mesh_shape["y"]
-    ), f"src_core col {src_core[1]} out of bounds for mesh shape {mesh_shape}."
+    assert (isinstance(src_core, tuple) and
+            len(src_core) == 2), "src_core must be a tuple of (row, col)."
+    assert (0 <= src_core[0] < mesh_shape["x"]
+           ), f"src_core row {src_core[0]} out of bounds for mesh shape {mesh_shape}."
+    assert (0 <= src_core[1] < mesh_shape["y"]
+           ), f"src_core col {src_core[1]} out of bounds for mesh shape {mesh_shape}."
 
     src_elements = 1
     for dim in src.shape:
         src_elements *= dim
     assert isinstance(size, int) and size >= -1, "size must be an integer >= -1."
-    assert (
-        size <= src_elements
-    ), f"size {size} exceeds source buffer size {src_elements}."
+    assert (size <= src_elements), f"size {size} exceeds source buffer size {src_elements}."
 
     src_region = to_buffer_region(src)
     dst_region = to_buffer_region(dst)
@@ -162,27 +151,20 @@ def broadcast(
             row, col = core_id_to_tuple(src_core_id)
             group = [(r, col) for r in range(mesh_shape["x"])]
         elif group.lower() in ["all", "a"]:
-            group = [
-                (r, c) for r in range(mesh_shape["x"]) for c in range(mesh_shape["y"])
-            ]
+            group = [(r, c) for r in range(mesh_shape["x"]) for c in range(mesh_shape["y"])]
         else:
             raise ValueError(f"Invalid group string: {group}")
     elif isinstance(group, Iterable):
         for core_id in group:
-            assert (
-                isinstance(core_id, tuple) and len(core_id) == 2
-            ), "Each core_id in group must be a tuple of (row, col)."
-            assert (
-                0 <= core_id[0] < mesh_shape["x"]
-            ), f"core_id row {core_id[0]} out of bounds for mesh shape {mesh_shape}."
-            assert (
-                0 <= core_id[1] < mesh_shape["y"]
-            ), f"core_id col {core_id[1]} out of bounds for mesh shape {mesh_shape}."
+            assert (isinstance(core_id, tuple) and
+                    len(core_id) == 2), "Each core_id in group must be a tuple of (row, col)."
+            assert (0 <= core_id[0] < mesh_shape["x"]
+                   ), f"core_id row {core_id[0]} out of bounds for mesh shape {mesh_shape}."
+            assert (0 <= core_id[1] < mesh_shape["y"]
+                   ), f"core_id col {core_id[1]} out of bounds for mesh shape {mesh_shape}."
         pass
     else:
-        raise ValueError(
-            "group must be either a string or an iterable of tuple[int, int]."
-        )
+        raise ValueError("group must be either a string or an iterable of tuple[int, int].")
 
     group = [CoreId(core_id) for core_id in group]
     dst_offset = 0  # Always 0 for now
@@ -224,39 +206,30 @@ def put(
     ), f"Source and destination buffer dtypes must match for broadcast. Got {src.dtype} vs {dst.dtype}."
     if len(src.shape) != len(dst.shape):
         raise ValueError(
-            "Source and destination buffer must have the same number of dimensions for broadcast."
-        )
+            "Source and destination buffer must have the same number of dimensions for broadcast.")
     for i in range(len(src.shape)):
         assert (
             src.shape[i] == dst.shape[i] or src.shape[i] == 1 or dst.shape[i] == 1
         ), f"Source buffer shape  and destination buffer shape must match for broadcast. Got {src.shape} vs {dst.shape}."
 
     mesh_shape = T.get_target_mesh_shape("auto")
-    assert (
-        isinstance(src_core, tuple) and len(src_core) == 2
-    ), "src_core must be a tuple of (row, col)."
-    assert (
-        0 <= src_core[0] < mesh_shape["x"]
-    ), f"src_core row {src_core[0]} out of bounds for mesh shape {mesh_shape}."
-    assert (
-        0 <= src_core[1] < mesh_shape["y"]
-    ), f"src_core col {src_core[1]} out of bounds for mesh shape {mesh_shape}."
-    assert (
-        isinstance(dst_core, tuple) and len(dst_core) == 2
-    ), "dst_core must be a tuple of (row, col)."
-    assert (
-        0 <= dst_core[0] < mesh_shape["x"]
-    ), f"dst_core row {dst_core[0]} out of bounds for mesh shape {mesh_shape}."
-    assert (
-        0 <= dst_core[1] < mesh_shape["y"]
-    ), f"dst_core col {dst_core[1]} out of bounds for mesh shape {mesh_shape}."
+    assert (isinstance(src_core, tuple) and
+            len(src_core) == 2), "src_core must be a tuple of (row, col)."
+    assert (0 <= src_core[0] < mesh_shape["x"]
+           ), f"src_core row {src_core[0]} out of bounds for mesh shape {mesh_shape}."
+    assert (0 <= src_core[1] < mesh_shape["y"]
+           ), f"src_core col {src_core[1]} out of bounds for mesh shape {mesh_shape}."
+    assert (isinstance(dst_core, tuple) and
+            len(dst_core) == 2), "dst_core must be a tuple of (row, col)."
+    assert (0 <= dst_core[0] < mesh_shape["x"]
+           ), f"dst_core row {dst_core[0]} out of bounds for mesh shape {mesh_shape}."
+    assert (0 <= dst_core[1] < mesh_shape["y"]
+           ), f"dst_core col {dst_core[1]} out of bounds for mesh shape {mesh_shape}."
     src_elements = 1
     for dim in src.shape:
         src_elements *= dim
     assert isinstance(size, int) and size >= -1, "size must be an integer >= -1."
-    assert (
-        size <= src_elements
-    ), f"size {size} exceeds source buffer size {src_elements}."
+    assert (size <= src_elements), f"size {size} exceeds source buffer size {src_elements}."
 
     src_region = to_buffer_region(src)
     dst_region = to_buffer_region(dst)
@@ -293,15 +266,12 @@ def all_gather(
     """
     mesh_shape = T.get_target_mesh_shape("auto")
     for core_id in group:
-        assert (
-            isinstance(core_id, tuple) and len(core_id) == 2
-        ), "Each core_id in group must be a tuple of (row, col)."
-        assert (
-            0 <= core_id[0] < mesh_shape["x"]
-        ), f"core_id row {core_id[0]} out of bounds for mesh shape {mesh_shape}."
-        assert (
-            0 <= core_id[1] < mesh_shape["y"]
-        ), f"core_id col {core_id[1]} out of bounds for mesh shape {mesh_shape}."
+        assert (isinstance(core_id, tuple) and
+                len(core_id) == 2), "Each core_id in group must be a tuple of (row, col)."
+        assert (0 <= core_id[0] < mesh_shape["x"]
+               ), f"core_id row {core_id[0]} out of bounds for mesh shape {mesh_shape}."
+        assert (0 <= core_id[1] < mesh_shape["y"]
+               ), f"core_id col {core_id[1]} out of bounds for mesh shape {mesh_shape}."
 
     assert (
         send_buffer.dtype == recv_buffer.dtype
@@ -318,9 +288,7 @@ def all_gather(
     ), f"Receive buffer size {recv_elements} is insufficient to hold gathered data from {len(group)} cores with send buffer size {send_elements}."
 
     assert isinstance(size, int) and size >= -1, "size must be an integer >= -1."
-    assert (
-        size <= send_elements
-    ), f"size {size} exceeds send buffer size {send_elements}."
+    assert (size <= send_elements), f"size {size} exceeds send buffer size {send_elements}."
     send_buffer_region = to_buffer_region(send_buffer)
     recv_buffer_region = to_buffer_region(recv_buffer)
     group = [CoreId(core_id) for core_id in group]

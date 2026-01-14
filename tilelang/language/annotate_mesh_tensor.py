@@ -1,9 +1,9 @@
+from __future__ import annotations
 from copy import deepcopy
 from typing import Callable, Literal
 
 from tvm import tir
 import tilelang.language as T
-
 """Utilities for working with MeshTensor abstractions.
 
 This module provides a small factory function `mesh_tensor_functions` that
@@ -143,12 +143,8 @@ def mesh_tensor_functions(mesh_shape: dict[str, int]) -> dict[str, Callable]:
         _mesh_tensor_info = {}
         for buffer, info in mesh_tensor_info.items():
             # Validate metadata structure for each buffer
-            if (
-                not isinstance(info, dict)
-                or "block_shape" not in info
-                or "program_id" not in info
-                or "sharding" not in info
-            ):
+            if (not isinstance(info, dict) or "block_shape" not in info or
+                    "program_id" not in info or "sharding" not in info):
                 raise ValueError(f"Invalid mesh tensor info: {info}")
             else:
                 # store metadata keyed by `buffer.data` so helpers can lookup
@@ -224,9 +220,7 @@ def mesh_tensor_functions(mesh_shape: dict[str, int]) -> dict[str, Callable]:
                 block_shape = info["block_shape"]
                 src = src[tuple(i * b for i, b in zip(src_coord, block_shape))]
             except KeyError as e:
-                raise ValueError(
-                    f"MeshTensor information for buffer {src} not found."
-                ) from e
+                raise ValueError(f"MeshTensor information for buffer {src} not found.") from e
 
         # If a destination coordinate is specified, compute its tile slice
         if dst_coord is not None:
@@ -235,9 +229,7 @@ def mesh_tensor_functions(mesh_shape: dict[str, int]) -> dict[str, Callable]:
                 block_shape = info["block_shape"]
                 dst = dst[tuple(i * b for i, b in zip(dst_coord, block_shape))]
             except KeyError as e:
-                raise ValueError(
-                    f"MeshTensor information for buffer {dst} not found."
-                ) from e
+                raise ValueError(f"MeshTensor information for buffer {dst} not found.") from e
 
         # Delegate to TileLang's copy primitive
         return T.copy(src, dst)
