@@ -2,7 +2,6 @@ import tilelang
 import tilelang.testing
 import tilelang.language as T
 
-
 tilelang.env.disable_cache()
 
 
@@ -25,25 +24,25 @@ def matmul(
 
     @T.prim_func
     def main(
-        A: T.Tensor((batch, M, K), dtype),  # type: ignore
-        B: T.Tensor((batch, K, N), dtype),  # type: ignore
-        C: T.Tensor((batch, M, N), dtype),  # type: ignore
+            A: T.Tensor((batch, M, K), dtype),  # type: ignore
+            B: T.Tensor((batch, K, N), dtype),  # type: ignore
+            C: T.Tensor((batch, M, N), dtype),  # type: ignore
     ):
         annotate_mesh_tensor_info(
             {
                 A: mt_info(sharding=(0, 1), block_shape=(1, block_M, block_K)),
                 B: mt_info(sharding=(0, 0), block_shape=(1, block_K, block_N)),
                 C: mt_info(sharding=(0, 1), block_shape=(1, block_M, block_N)),
-            },
-        )
-        
+            },)
+
         tile_batch, tile_M, tile_N = get_tile_shape(C)
 
-        with T.Kernel(tile_N, tile_M, tile_batch, threads=128) as (
-            bx,
-            by,
-            bz,
-        ):
+        with T.Kernel(
+                tile_N, tile_M, tile_batch, threads=128) as (
+                    bx,
+                    by,
+                    bz,
+                ):
             A_shared = T.alloc_shared((block_M, block_K), dtype)
             B_shared = T.alloc_shared((block_K, block_N), dtype)
             C_local = T.alloc_fragment((block_M, block_N), accum_dtype)

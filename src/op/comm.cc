@@ -26,20 +26,28 @@ namespace tl {
   }                                                                            \
   TVM_REGISTER_OP("tl." #OpName)                                               \
       .set_attr<TScriptPrinterName>("TScriptPrinterName", #OpName)
-    TIR_DEFINE_TL_BUILTIN(comm_barrier).set_num_inputs(-1).set_attr<TCallEffectKind>(
-        "TCallEffectKind", Integer(CallEffectKind::kOpaque));
-    TIR_DEFINE_TL_BUILTIN(comm_fence).set_num_inputs(0).set_attr<TCallEffectKind>(
-        "TCallEffectKind", Integer(CallEffectKind::kOpaque)); 
-    TIR_DEFINE_TL_BUILTIN(CoreId).set_num_inputs(1).set_attr<TCallEffectKind>(
-        "TCallEffectKind", Integer(CallEffectKind::kOpaque));
-    TIR_DEFINE_TL_BUILTIN(comm_current_core).set_num_inputs(0).set_attr<TCallEffectKind>(
-        "TCallEffectKind", Integer(CallEffectKind::kOpaque));
-    TIR_DEFINE_TL_BUILTIN(broadcast_).set_num_inputs(-1).set_attr<TCallEffectKind>(
-        "TCallEffectKind", Integer(CallEffectKind::kOpaque));
-    // src_buffer, dst_buffer, src_core, size, direction(1: horizontal, 2: vertical), *group
+TIR_DEFINE_TL_BUILTIN(comm_barrier)
+    .set_num_inputs(-1)
+    .set_attr<TCallEffectKind>("TCallEffectKind",
+                               Integer(CallEffectKind::kOpaque));
+TIR_DEFINE_TL_BUILTIN(comm_fence)
+    .set_num_inputs(0)
+    .set_attr<TCallEffectKind>("TCallEffectKind",
+                               Integer(CallEffectKind::kOpaque));
+TIR_DEFINE_TL_BUILTIN(CoreId).set_num_inputs(1).set_attr<TCallEffectKind>(
+    "TCallEffectKind", Integer(CallEffectKind::kOpaque));
+TIR_DEFINE_TL_BUILTIN(comm_current_core)
+    .set_num_inputs(0)
+    .set_attr<TCallEffectKind>("TCallEffectKind",
+                               Integer(CallEffectKind::kOpaque));
+TIR_DEFINE_TL_BUILTIN(broadcast_)
+    .set_num_inputs(-1)
+    .set_attr<TCallEffectKind>("TCallEffectKind",
+                               Integer(CallEffectKind::kOpaque));
+// src_buffer, dst_buffer, src_core, size, direction(1: horizontal, 2:
+// vertical), *group
 
 using namespace tir;
-
 
 Broadcast::Broadcast(Array<PrimExpr> args) {
   ObjectPtr<BroadcastNode> node = tvm::ffi::make_object<BroadcastNode>();
@@ -67,7 +75,7 @@ TileOperator BroadcastNode::Clone() const {
 }
 
 LayoutMap BroadcastNode::InferLayout(const LayoutInferArgs &T,
-                                InferLevel level) const {
+                                     InferLevel level) const {
   return {};
 }
 
@@ -97,7 +105,8 @@ Stmt BroadcastNode::Lower(const LowerArgs &T, arith::Analyzer *analyzer) const {
     dst_elements *= dst_range[i]->extent;
   }
   dst_elements = analyzer->Simplify(dst_elements);
-  ICHECK(Downcast<IntImm>(src_elements)->value <= Downcast<IntImm>(dst_elements)->value)
+  ICHECK(Downcast<IntImm>(src_elements)->value <=
+         Downcast<IntImm>(dst_elements)->value)
       << "Source buffer size larger than destination buffer size: "
       << src_elements << " vs " << dst_elements;
   ICHECK(size->value <= Downcast<IntImm>(src_elements)->value)
@@ -110,14 +119,17 @@ Stmt BroadcastNode::Lower(const LowerArgs &T, arith::Analyzer *analyzer) const {
   } else {
     broadcast_elements = size;
   }
-  ICHECK((Downcast<IntImm>(broadcast_elements)->value + dst_offset->value) <= Downcast<IntImm>(dst_elements)->value)
+  ICHECK((Downcast<IntImm>(broadcast_elements)->value + dst_offset->value) <=
+         Downcast<IntImm>(dst_elements)->value)
       << "Broadcast size + dst_offset larger than destination buffer size: "
-      << (Downcast<IntImm>(broadcast_elements)->value + dst_offset->value) << " vs "
-      << Downcast<IntImm>(dst_elements)->value;
-  
+      << (Downcast<IntImm>(broadcast_elements)->value + dst_offset->value)
+      << " vs " << Downcast<IntImm>(dst_elements)->value;
+
   PrimExpr src_addr = src.access_ptr(1, DataType::Handle(), 1, 0, src_elements);
-  PrimExpr dst_addr = dst.access_ptr(2, DataType::Handle(), 1, Downcast<IntImm>(dst_offset->value), src_elements);
-  
+  PrimExpr dst_addr =
+      dst.access_ptr(2, DataType::Handle(), 1,
+                     Downcast<IntImm>(dst_offset->value), src_elements);
+
   int src_core_x = src_core->value / mesh_y;
   int src_core_y = src_core->value % mesh_y;
 
@@ -148,8 +160,8 @@ Stmt BroadcastNode::Lower(const LowerArgs &T, arith::Analyzer *analyzer) const {
     args.push_back(dst_addr);
     args.push_back(broadcast_elements);
     args.push_back(src_core);
-    args.push_back(2);  // direction: row-wise
-    for (const auto& r : group_rows) {
+    args.push_back(2); // direction: row-wise
+    for (const auto &r : group_rows) {
       args.push_back(IntImm(DataType::Int(32), r));
     }
     Stmt broadcast = Evaluate(Call(DataType::Handle(), broadcast_(), args));
@@ -165,14 +177,12 @@ Stmt BroadcastNode::Lower(const LowerArgs &T, arith::Analyzer *analyzer) const {
       args.push_back(dst_addr);
       args.push_back(broadcast_elements);
       args.push_back(int(row * mesh_y) + src_core_y);
-      args.push_back(1);  // direction: column-wise
+      args.push_back(1); // direction: column-wise
       for (size_t j = 0; j < group_mesh[row].size(); j++) {
         args.push_back(IntImm(DataType::Int(32), group_mesh[row][j]));
       }
       Stmt broadcast = Evaluate(Call(DataType::Handle(), broadcast_(), args));
       seq.push_back(broadcast);
-
-
     }
     Stmt seqstmt = SeqStmt::Flatten(seq);
     return seqstmt;
@@ -183,8 +193,8 @@ Stmt BroadcastNode::Lower(const LowerArgs &T, arith::Analyzer *analyzer) const {
     args.push_back(dst_addr);
     args.push_back(broadcast_elements);
     args.push_back(src_core);
-    args.push_back(1);  // direction: column-wise
-    for (const auto& g : group_mesh[src_core_x]) {
+    args.push_back(1); // direction: column-wise
+    for (const auto &g : group_mesh[src_core_x]) {
       args.push_back(IntImm(DataType::Int(32), g));
     }
     Stmt broadcast = Evaluate(Call(DataType::Handle(), broadcast_(), args));
@@ -199,8 +209,6 @@ TIR_REGISTER_TL_TILE_OP(Broadcast, comm_broadcast)
     .set_num_inputs(-1)
     .set_attr<TCallEffectKind>("TCallEffectKind",
                                Integer(CallEffectKind::kOpaque));
-
-
 
 Put::Put(Array<PrimExpr> args) {
   ObjectPtr<PutNode> node = tvm::ffi::make_object<PutNode>();
@@ -218,7 +226,7 @@ TileOperator PutNode::Clone() const {
 }
 
 LayoutMap PutNode::InferLayout(const LayoutInferArgs &T,
-                                InferLevel level) const {
+                               InferLevel level) const {
   return {};
 }
 
@@ -239,7 +247,6 @@ TIR_REGISTER_TL_TILE_OP(Put, comm_put)
     .set_attr<TCallEffectKind>("TCallEffectKind",
                                Integer(CallEffectKind::kOpaque));
 
-
 Allgather::Allgather(Array<PrimExpr> args) {
   ObjectPtr<AllgatherNode> node = tvm::ffi::make_object<AllgatherNode>();
   node->send = args[0];
@@ -256,7 +263,7 @@ TileOperator AllgatherNode::Clone() const {
 }
 
 LayoutMap AllgatherNode::InferLayout(const LayoutInferArgs &T,
-                                InferLevel level) const {
+                                     InferLevel level) const {
   return {};
 }
 
@@ -314,7 +321,6 @@ TIR_REGISTER_TL_TILE_OP(Allgather, comm_allgather)
     .set_attr<TCallEffectKind>("TCallEffectKind",
                                Integer(CallEffectKind::kOpaque));
 
-
 Reduce::Reduce(Array<PrimExpr> args) {
   ObjectPtr<ReduceNode> node = tvm::ffi::make_object<ReduceNode>();
   node->op = Downcast<IntImm>(args[0]);
@@ -347,20 +353,19 @@ TileOperator ReduceNode::Clone() const {
 }
 
 LayoutMap ReduceNode::InferLayout(const LayoutInferArgs &T,
-                                InferLevel level) const {
+                                  InferLevel level) const {
   return {};
 }
 
 Stmt ReduceNode::Lower(const LowerArgs &T, arith::Analyzer *analyzer) const {
-  Stmt reduce = Evaluate(
-      tvm::tir::Call(DataType::Handle(), tvm::tl::loop_break(), {}));
+  Stmt reduce =
+      Evaluate(tvm::tir::Call(DataType::Handle(), tvm::tl::loop_break(), {}));
   return reduce;
 }
 TIR_REGISTER_TL_TILE_OP(Reduce, comm_reduce)
     .set_num_inputs(-1)
     .set_attr<TCallEffectKind>("TCallEffectKind",
                                Integer(CallEffectKind::kOpaque));
-
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   PutNode::RegisterReflection();

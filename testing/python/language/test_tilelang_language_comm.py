@@ -2,7 +2,6 @@ import tilelang
 import tilelang.testing
 import tilelang.language as T
 
-
 tilelang.env.disable_cache()
 
 
@@ -16,9 +15,9 @@ def matmul(
 
     @T.prim_func
     def main(
-        A: T.Tensor((batch, M, K), dtype),  # type: ignore
-        B: T.Tensor((batch, K, N), dtype),  # type: ignore
-        C: T.Tensor((batch, M, N), dtype),  # type: ignore
+            A: T.Tensor((batch, M, K), dtype),  # type: ignore
+            B: T.Tensor((batch, K, N), dtype),  # type: ignore
+            C: T.Tensor((batch, M, N), dtype),  # type: ignore
     ):
         T.comm.CoreId((1, 2))
         T.comm.put(A, B, (1, 3))
@@ -34,6 +33,7 @@ def matmul(
         T.comm.current_core()
 
     return main
+
 
 def test_frontend():
     func = matmul(64, 1024, 1024, 1024)
@@ -58,7 +58,7 @@ def main(A_handle: T.handle, B_handle: T.handle, C_handle: T.handle):
     T.comm_barrier(T.CoreId(0), T.CoreId(1), T.CoreId(4), T.CoreId(5))
     T.comm_fence()
     T.comm_current_core()"""
-    
+
     assert func.script() == func_TIR
 
 
